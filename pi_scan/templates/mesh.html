@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi 3D Scanner – Mesh Viewer</title>
+
+    <!-- Three.js ES Module importmap -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #0d0d0f;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        canvas { display: block; }
+
+        /* ── Control Panel ── */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 20;
+            background: rgba(15, 15, 20, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 18px 22px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            min-width: 230px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+
+        #ui h2 {
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: #fff;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #ui h2::before {
+            content: '';
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        #scanBtn {
+            width: 100%;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        #scanBtn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+        #scanBtn:active:not(:disabled) { transform: translateY(0); }
+        #scanBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #status {
+            margin-top: 12px;
+            font-size: 12px;
+            color: #94a3b8;
+            min-height: 18px;
+            line-height: 1.5;
+        }
+
+        #status.error   { color: #f87171; }
+        #status.success { color: #4ade80; }
+        #status.loading { color: #60a5fa; }
+
+        /* ── Loading overlay ── */
+        #overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            background: rgba(13,13,15,0.75);
+            backdrop-filter: blur(4px);
+            transition: opacity 0.4s;
+        }
+
+        #overlay.hidden { opacity: 0; pointer-events: none; }
+
+        .spinner {
+            width: 48px; height: 48px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #overlayMsg {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        /* ── Hint ── */
+        #hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            color: rgba(255,255,255,0.25);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Loading overlay -->
+    <div id="overlay">
+        <div class="spinner"></div>
+        <div id="overlayMsg">Initializing scene…</div>
+    </div>
+
+    <!-- Control panel -->
+    <div id="ui">
+        <h2>Pi 3D Scanner</h2>
+        <button id="scanBtn">Run New Scan</button>
+        <div id="status">Loading last mesh…</div>
+    </div>
+
+    <div id="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+
+        // ── Scene setup ──────────────────────────────────────────────
+        const scene    = new THREE.Scene();
+        scene.background = new THREE.Color(0x0d0d0f);
+        // scene.fog = new THREE.FogExp2(0x0d0d0f, 0.002); // Disabled fog to avoid hiding distant meshes
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(200, 200, 400);
+
+        // Helper: Axes
+        const axesHelper = new THREE.AxesHelper(100);
+        scene.add(axesHelper);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(devicePixelRatio);
+        renderer.setSize(innerWidth, innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(1, 2, 3);
+        scene.add(dirLight);
+
+        // Grid helper for reference
+        const grid = new THREE.GridHelper(500, 40, 0x222233, 0x1a1a2e);
+        grid.position.y = -80;
+        scene.add(grid);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+        });
+
+        // ── Animation loop ────────────────────────────────────────────
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        })();
+
+        // ── Helpers ───────────────────────────────────────────────────
+        const overlay    = document.getElementById('overlay');
+        const overlayMsg = document.getElementById('overlayMsg');
+        const statusEl   = document.getElementById('status');
+
+        function setStatus(msg, cls = '') {
+            statusEl.className = cls;
+            statusEl.textContent = msg;
+        }
+
+        function showOverlay(msg) {
+            overlayMsg.textContent = msg;
+            overlay.classList.remove('hidden');
+        }
+
+        function hideOverlay() {
+            overlay.classList.add('hidden');
+        }
+
+        // Auto-fit camera to bounding box of loaded mesh
+        function fitCamera(object) {
+            const box    = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+            const size   = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov    = camera.fov * (Math.PI / 180);
+            const dist   = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.5;
+
+            // Reposition controls target to mesh center
+            controls.target.copy(center);
+            camera.position.copy(center).add(new THREE.Vector3(0, maxDim * 0.3, dist));
+            controls.update();
+        }
+
+        // ── GLB loader ────────────────────────────────────────────────
+        let currentMesh = null;
+        const loader = new GLTFLoader();
+
+        function loadMesh(url) {
+            showOverlay('Loading mesh…');
+            setStatus('Loading mesh…', 'loading');
+
+            loader.load(
+                url,
+                (gltf) => {                        // ✅ success
+                    console.log('Mesh loaded successfully:', gltf);
+                    if (currentMesh) scene.remove(currentMesh);
+                    
+                    currentMesh = gltf.scene;
+                    
+                    // Ensure mesh is visible from both sides and uses vertex colors
+                    currentMesh.traverse(child => {
+                        if (child.isMesh) {
+                            child.material.side = THREE.DoubleSide;
+                            child.material.vertexColors = true;
+                        }
+                    });
+
+                    scene.add(currentMesh);
+                    fitCamera(currentMesh);
+                    hideOverlay();
+                    setStatus('Mesh loaded ✓', 'success');
+                },
+                (xhr) => {                         // progress
+                    if (xhr.total) {
+                        const pct = Math.round(xhr.loaded / xhr.total * 100);
+                        overlayMsg.textContent = `Loading mesh… ${pct}%`;
+                    }
+                },
+                (err) => {                         // ❌ error
+                    console.warn('GLB load error:', err);
+                    hideOverlay();
+                    setStatus('No mesh yet — click "Run New Scan"', 'error');
+                }
+            );
+        }
+
+        // ── Scan button ───────────────────────────────────────────────
+        document.getElementById('scanBtn').addEventListener('click', function () {
+            this.disabled = true;
+            showOverlay('Running MiDaS depth inference on Pi…');
+            setStatus('Scanning… (may take ~30s)', 'loading');
+
+            fetch('/scan')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        setStatus('Scan done! Loading mesh…', 'success');
+                        // Cache-bust so the browser fetches the fresh GLB
+                        loadMesh(data.mesh + '?t=' + Date.now());
+                    } else {
+                        hideOverlay();
+                        setStatus('Error: ' + (data.message || data.error), 'error');
+                    }
+                })
+                .catch(err => {
+                    hideOverlay();
+                    setStatus('Fetch error: ' + err, 'error');
+                })
+                .finally(() => { this.disabled = false; });
+        });
+
+        // ── Auto-load existing mesh on startup ────────────────────────
+        loadMesh('/data/mesh.glb');
+    </script>
+</body>
+</html>
