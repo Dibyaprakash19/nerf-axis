@@ -1,37 +1,44 @@
 #!/bin/bash
+# sync.sh — High-performance sync script with progress tracking.
 
-# Configuration
+# ── Configuration ─────────────────────────────────────────────────────────────
 PI_HOST="gp5.local"
 PI_USER="gp"
 DEST_PATH="~/pi_scan"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GREEN='\033[0;32m'
+RED='\033[0;31m'
 
-echo "Syncing $SCRIPT_DIR/ to $PI_USER@$PI_HOST:$DEST_PATH..."
+# ── Sync Engine ───────────────────────────────────────────────────────────────
+# Flags:
+#  -a: Archive mode (perms, times, symlinks)
+#  -v: Verbose
+#  -z: Compression (fast for text/code)
+#  -P: --partial (keep partially transferred files) + --progress (speed/ETA)
+#  --delete: Cleanup files on Pi that no longer exist locally (keeps it clean)
 
-ssh "$PI_USER@$PI_HOST" "mkdir -p $DEST_PATH"
+echo " Syncing NeRF-Axis pipeline to $PI_HOST"
 
-# Sync using rsync for efficiency
-# -a: archive mode
-# -v: verbose
-# -z: compress
-# --exclude: ignore certain patterns
-rsync -avz \
+rsync -aviP --stats \
   --exclude 'venv' \
   --exclude '.git' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '*.tflite' \
-  --exclude 'data/*.glb' \
-  --exclude 'data/images' \
-  --exclude 'data/live_scan' \
-  "$SCRIPT_DIR/" "$PI_USER@$PI_HOST:$DEST_PATH/"
+  --exclude 'data/' \
+  --exclude '*.glb' \
+  --exclude 'context.md' \
+  "$SRC_DIR/" "$PI_USER@$PI_HOST:$DEST_PATH/"
 
-if [ -f "$SCRIPT_DIR/../context.md" ]; then
-  rsync -avz "$SCRIPT_DIR/../context.md" "$PI_USER@$PI_HOST:$DEST_PATH/context.md"
+EXIT_CODE=$?
+
+# Optional: Sync context.md if it exists in parent
+if [ -f "$SRC_DIR/../context.md" ]; then
+  rsync -az "$SRC_DIR/../context.md" "$PI_USER@$PI_HOST:$DEST_PATH/context.md"
 fi
 
-if [ $? -eq 0 ]; then
-    echo "Sync successful!"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "\n${GREEN}+++ Sync Complete. System is consistent."
 else
-    echo "Sync failed. Check your SSH connection to $PI_HOST."
+    echo -e "\n${RED}--- Sync Failed. Check SSH connection to $PI_HOST."
 fi

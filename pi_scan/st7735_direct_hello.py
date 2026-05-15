@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 WIDTH = 128
 HEIGHT = 160
-SPI_SPEED = 1_000_000
+SPI_SPEED = 24_000_000
 
 SWRESET = 0x01
 SLPOUT = 0x11
