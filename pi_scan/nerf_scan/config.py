@@ -35,7 +35,7 @@ STEPS_90     = 128    # 128 × 8-state sequence ≈ 90°
 # ── Mesh ──────────────────────────────────────────────────────────────────────
 # step=2 on 256×256 → 128×128 grid = exactly TFT_W × TFT_H vertices
 MESH_STEP    = 2      # depth grid subsampling for GLB (quality)
-TFT_PTS      = 2000  # max points rendered on TFT (speed)
+TFT_PTS      = 5000  # max points rendered on TFT (speed)
 ROTATION_SPEED = 0.10  # radians per frame
 FRAME_DELAY    = 0.01  # seconds between frames (~25 fps ceiling)
 
@@ -46,5 +46,5 @@ SKIN_LO      = (0, 5, 40)
 SKIN_HI      = (40, 255, 255)
 
 # ── Web viewer ────────────────────────────────────────────────────────────────
-WEB_PORT       = 8080
+WEB_PORT       = 8000
 LOOP_DISPLAY_S = 15   # seconds to display model before auto-rescan

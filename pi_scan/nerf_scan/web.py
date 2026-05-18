@@ -1,62 +1,66 @@
 """
-nerf_scan/web.py  —  stdlib HTTP server, port 8080.
-No Flask. No Jinja. Zero extra dependencies.
-
-Routes:
-    GET /          HTML page embedding <model-viewer> (Google web component)
-    GET /mesh.glb  Serve current_mesh.glb; 404 if no scan yet.
-
-Call start() from main.py; runs in a daemon thread.
+nerf_scan/web.py - Minimal HTTP server for mesh viewing.
 """
-
 import os, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from .config import WEB_PORT, GLB_PATH
 
+rescan_event = threading.Event()
+
 _HTML = """\
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NeRF-Axis — Live Scan</title>
-<script type="module"
-  src="https://unpkg.com/@google/model-viewer@3/dist/model-viewer.min.js"></script>
+<title>NeRF-Axis 3D Viewer</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@3/dist/model-viewer.min.js"></script>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box }
-  body { background:#0c0c0c; height:100vh; display:flex;
-         flex-direction:column; align-items:center; justify-content:center }
-  model-viewer { width:100vw; height:93vh }
-  footer { font:11px/2 monospace; color:#444; letter-spacing:.05em }
-  footer a { color:#555; text-decoration:none }
+  body { margin:0; background:#000; color:#fff; font-family:sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+  model-viewer { flex:1; width:100%; }
+  footer { height:100px; display:flex; gap:20px; align-items:center; justify-content:center; background:#111; }
+  button { padding:15px 30px; font-size:18px; cursor:pointer; background:#f44; color:#fff; border:none; border-radius:5px; font-weight:bold; }
+  button:hover { background:#d33; }
+  a { color:#888; text-decoration:none; font-size:14px; }
 </style>
+<script>
+  async function rescan() {
+    const btn = document.querySelector('button');
+    btn.disabled = true; btn.innerText = 'Scanning...';
+    await fetch('/rescan', {method: 'POST'});
+    setTimeout(() => location.reload(), 15000);
+  }
+</script>
 </head>
 <body>
-<model-viewer src="/mesh.glb" auto-rotate camera-controls
-  shadow-intensity="1" environment-image="neutral" exposure="1.1"
-  alt="3D scan"></model-viewer>
-<footer>nerf-axis &nbsp;·&nbsp; <a href="/mesh.glb">mesh.glb</a></footer>
+<model-viewer src="/mesh.glb" auto-rotate camera-controls shadow-intensity="1" environment-image="neutral"></model-viewer>
+<footer>
+  <button onclick="rescan()">NEW SCAN</button>
+  <a href="/mesh.glb">Download GLB</a>
+</footer>
 </body>
 </html>
 """.encode()
 
-_NO_SCAN = b"No scan available. Trigger a scan on the device first."
-
-
-class _H(BaseHTTPRequestHandler):
-    def log_message(self, *_): pass  # silence access log
+class _Handler(BaseHTTPRequestHandler):
+    def log_message(self, *_): pass
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
-            self._reply(200, "text/html; charset=utf-8", _HTML)
+            self._reply(200, "text/html", _HTML)
         elif self.path == "/mesh.glb":
             if os.path.isfile(GLB_PATH):
-                data = open(GLB_PATH, "rb").read()
-                self._reply(200, "model/gltf-binary", data)
+                self._reply(200, "model/gltf-binary", open(GLB_PATH, "rb").read())
             else:
-                self._reply(404, "text/plain", _NO_SCAN)
+                self._reply(404, "text/plain", b"No scan data yet.")
         else:
-            self._reply(404, "text/plain", b"not found")
+            self._reply(404, "text/plain", b"Not found")
+
+    def do_POST(self):
+        if self.path == "/rescan":
+            rescan_event.set()
+            self._reply(200, "text/plain", b"OK")
+        else:
+            self._reply(404, "text/plain", b"Not found")
 
     def _reply(self, code, ct, body):
         self.send_response(code)
@@ -66,17 +70,12 @@ class _H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-
-_srv: HTTPServer = None
-
-
+_srv = None
 def start():
     global _srv
-    _srv = HTTPServer(("0.0.0.0", WEB_PORT), _H)
+    _srv = HTTPServer(("0.0.0.0", WEB_PORT), _Handler)
     threading.Thread(target=_srv.serve_forever, daemon=True).start()
-    print(f"[web] http://gp5.local:{WEB_PORT}/")
-
+    print(f"[web] Listening on port {WEB_PORT}")
 
 def stop():
-    if _srv:
-        _srv.shutdown()
+    if _srv: _srv.shutdown()

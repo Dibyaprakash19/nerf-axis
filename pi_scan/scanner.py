@@ -22,6 +22,46 @@ try:
 except ImportError:
     HAS_REMBG = False
 
+class BackgroundRemover:
+    def __init__(self, model_path="deeplab_model.tflite"):
+        try:
+            self.interpreter = tflite.Interpreter(model_path=model_path)
+            self.interpreter.allocate_tensors()
+            self.input_details = self.interpreter.get_input_details()
+            self.output_details = self.interpreter.get_output_details()
+            self.input_size = self.input_details[0]['shape'][1]
+            print(f"✅ DeepLabV3 Background Remover Loaded from {model_path}")
+        except Exception as e:
+            print(f"❌ Failed to load BackgroundRemover: {e}")
+            self.interpreter = None
+
+    def remove(self, img_bgr):
+        """Returns RGB image with background removed."""
+        if self.interpreter is None:
+            return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        
+        h, w = img_bgr.shape[:2]
+        input_img = cv2.resize(img_bgr, (self.input_size, self.input_size))
+        input_img = cv2.cvtColor(input_img, cv2.COLOR_BGR2RGB)
+        input_img = np.expand_dims(input_img, axis=0).astype(np.float32)
+        input_img = (input_img / 127.5) - 1.0
+
+        self.interpreter.set_tensor(self.input_details[0]['index'], input_img)
+        self.interpreter.invoke()
+
+        seg_map = self.interpreter.get_tensor(self.output_details[0]['index'])
+        seg_map = np.squeeze(seg_map)
+        if len(seg_map.shape) == 3:
+            seg_map = np.argmax(seg_map, axis=-1)
+            
+        seg_map = cv2.resize(seg_map.astype(np.uint8), (w, h))
+        mask = (seg_map != 0).astype(np.uint8)
+        
+        result = cv2.bitwise_and(img_bgr, img_bgr, mask=mask)
+        return cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+
+_remover = BackgroundRemover()
+
 class MiDaSScanner:
     """
     Handles MiDaS depth inference and 3D point cloud / mesh generation.
@@ -47,18 +87,9 @@ class MiDaSScanner:
         h_orig, w_orig = img_rgb.shape[:2]
 
         if remove_bg:
-            if HAS_REMBG:
-                try:
-                    pil_img = Image.fromarray(img_rgb)
-                    no_bg = remove(pil_img)
-                    black_bg = Image.new("RGB", no_bg.size, (0, 0, 0))
-                    black_bg.paste(no_bg, mask=no_bg.split()[3])
-                    img_rgb = np.array(black_bg)
-                except Exception as e:
-                    print(f"rembg failed, falling back to simple masking: {e}")
-                    img_rgb = self._remove_bg_simple(img_rgb)
-            else:
-                img_rgb = self._remove_bg_simple(img_rgb)
+            img_rgb = _remover.remove(img)
+        else:
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         img_input = cv2.resize(img_rgb, (self.input_size, self.input_size))
         img_input = img_input.astype(np.float32) / 255.0

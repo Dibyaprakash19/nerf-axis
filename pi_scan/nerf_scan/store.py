@@ -42,15 +42,16 @@ def save(verts: np.ndarray, faces: np.ndarray,
       - COLOR_0 accessor   (float32 VEC3 — vertex RGB 0..1)
     """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    # Always save raw NPZ for high-res rendering/video
+    npz = path.replace(".glb", ".npz")
+    np.savez_compressed(npz, verts=verts, faces=faces, colors=colors)
+    
     try:
         _save_glb(verts, faces, colors, path)
-        print(f"[store] GLB → {path}  ({len(verts)} verts, {len(faces)} faces)")
+        print(f"[store] GLB -> {path}")
         return path
     except Exception as e:
-        print(f"[store] GLB failed ({e}), saving NPZ")
-        npz = path.replace(".glb", ".npz")
-        np.savez_compressed(npz, verts=verts, faces=faces, colors=colors)
-        print(f"[store] NPZ → {npz}")
+        print(f"[store] GLB failed ({e})")
         return npz
 
 
