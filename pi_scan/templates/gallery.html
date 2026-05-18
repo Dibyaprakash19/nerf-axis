@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi 3D Scanner – Multi-View Gallery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg:       #080a0f;
+            --surface:  #0f1117;
+            --card:     #13161f;
+            --border:   rgba(255,255,255,0.07);
+            --accent:   #6366f1;
+            --accent2:  #3b82f6;
+            --green:    #34d399;
+            --red:      #f87171;
+            --amber:    #fbbf24;
+            --text:     #e2e8f0;
+            --muted:    #64748b;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', system-ui, sans-serif;
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            grid-template-rows: 60px 1fr;
+        }
+
+        /* ── Top bar ── */
+        header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 0 24px;
+            background: rgba(8,10,15,0.9);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            position: sticky; top: 0; z-index: 100;
+        }
+        header .logo {
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.3px;
+        }
+        header .logo span { color: var(--accent); }
+        header .sep { flex: 1; }
+        header .pill {
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+        header a.btn {
+            font-size: 12px;
+            padding: 6px 14px;
+            border-radius: 8px;
+            background: var(--accent);
+            color: #fff;
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity .15s;
+        }
+        header a.btn:hover { opacity: .8; }
+
+        /* ── Sidebar ── */
+        aside {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px 16px;
+            gap: 12px;
+            overflow-y: auto;
+        }
+        aside h3 {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            padding-left: 8px;
+            margin-bottom: 4px;
+        }
+
+        .pair-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: background .15s, border-color .15s;
+        }
+        .pair-item:hover { background: rgba(255,255,255,0.04); }
+        .pair-item.active {
+            background: rgba(99,102,241,0.12);
+            border-color: rgba(99,102,241,0.3);
+        }
+        .pair-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            flex-shrink: 0;
+        }
+        .pair-dot.ok  { background: var(--green); }
+        .pair-dot.err { background: var(--red); }
+        .pair-dot.skip{ background: var(--amber); }
+
+        .pair-label { font-size: 13px; font-weight: 500; }
+        .pair-meta  { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+        /* Batch button */
+        .batch-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 11px 16px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity .2s, transform .1s;
+            width: 100%;
+        }
+        .batch-btn:hover:not(:disabled) { opacity: .85; transform: translateY(-1px); }
+        .batch-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+        .progress-bar-wrap {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            width: 0%;
+            transition: width .4s ease;
+        }
+
+        /* ── Main 3D viewer ── */
+        main {
+            position: relative;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100%; height: 100%;
+        }
+        #canvas-container canvas { display: block; }
+
+        /* Info overlay */
+        #info-panel {
+            position: absolute;
+            top: 16px; left: 16px;
+            background: rgba(8,10,15,0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            min-width: 200px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        #info-panel h4 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        #info-panel .stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--muted);
+            padding: 3px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        #info-panel .stat:last-child { border-bottom: none; }
+        #info-panel .stat .val { color: var(--text); font-weight: 500; }
+
+        /* Loading overlay on canvas */
+        #canvas-overlay {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 14px;
+            background: rgba(8,10,15,0.7);
+            backdrop-filter: blur(4px);
+            transition: opacity .35s;
+            pointer-events: none;
+        }
+        #canvas-overlay.hidden { opacity: 0; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #canvas-overlay-msg { font-size: 13px; color: var(--muted); }
+
+        /* hint */
+        #hint {
+            position: absolute;
+            bottom: 16px; left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: rgba(255,255,255,0.2);
+            pointer-events: none;
+        }
+
+        /* Sidebar log */
+        #batch-log {
+            font-size: 11px;
+            color: var(--muted);
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 160px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        /* Image strip */
+        #image-strip {
+            position: absolute;
+            bottom: 40px; right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(8,10,15,0.7);
+            backdrop-filter: blur(8px);
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            max-width: 140px;
+        }
+        .thumb {
+            width: 120px; height: 80px;
+            border-radius: 6px;
+            object-fit: cover;
+            border: 1px solid var(--border);
+            transition: transform .2s;
+            cursor: zoom-in;
+        }
+        .thumb:hover { transform: scale(1.05); border-color: var(--accent); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+    <!-- ── Top bar ── -->
+    <header>
+        <div class="logo">Pi 3D Scanner <span>Gallery</span></div>
+        <div class="sep"></div>
+        <div class="pill" id="header-status">Loading…</div>
+        <a href="/mesh" class="btn">Single Viewer</a>
+    </header>
+
+    <!-- ── Sidebar ── -->
+    <aside>
+        <h3>Test Pairs</h3>
+        <div id="pair-list">
+            <!-- Populated by JS -->
+        </div>
+
+        <div style="height:1px; background:var(--border); margin: 4px 0;"></div>
+        <h3>Turntable Control</h3>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button class="batch-btn" style="background: var(--surface); border: 1px solid var(--border);" onclick="rotateMotor(90)">
+                ↻ +90°
+            </button>
+            <button class="batch-btn" style="background: var(--surface); border: 1px solid var(--border);" onclick="rotateMotor(-90)">
+                ↺ -90°
+            </button>
+        </div>
+        <button class="batch-btn" style="background: var(--surface); border: 1px solid var(--border); margin-top: 8px;" onclick="rotateMotor(360)">
+            Full 360°
+        </button>
+
+        <div style="height:1px; background:var(--border); margin: 4px 0;"></div>
+        <h3>Batch Run</h3>
+
+        <button class="batch-btn" id="batchBtn">
+            ▶ Run All 10 Pairs
+        </button>
+        <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div id="batch-log">Ready.</div>
+    </aside>
+
+    <script>
+        async function rotateMotor(deg) {
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const res = await fetch('/rotate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ degrees: deg })
+                });
+                const data = await res.json();
+                console.log('Rotation:', data);
+            } catch (err) {
+                console.error('Rotation failed:', err);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+    </script>
+
+    <!-- ── Main viewer ── -->
+    <main>
+        <div id="canvas-container"></div>
+
+        <div id="canvas-overlay">
+            <div class="spinner"></div>
+            <div id="canvas-overlay-msg">Select a pair to view mesh</div>
+        </div>
+
+        <div id="info-panel">
+            <h4 id="info-title">—</h4>
+            <div class="stat"><span>Status</span>  <span class="val" id="stat-status">—</span></div>
+            <div class="stat"><span>Views</span>   <span class="val" id="stat-views">—</span></div>
+            <div class="stat"><span>Time</span>    <span class="val" id="stat-time">—</span></div>
+            <div class="stat"><span>File size</span><span class="val" id="stat-size">—</span></div>
+        </div>
+
+        <div id="image-strip"></div>
+        <div id="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+    </main>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+
+        // ── Scene ─────────────────────────────────────────────────────────────
+        const container = document.getElementById('canvas-container');
+        const scene     = new THREE.Scene();
+        scene.background = new THREE.Color(0x080a0f);
+
+        const camera = new THREE.PerspectiveCamera(
+            55, container.clientWidth / container.clientHeight, 1, 50000
+        );
+        camera.position.set(200, 150, 350);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(devicePixelRatio);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping  = true;
+        controls.dampingFactor  = 0.06;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+        dir.position.set(1, 2, 3);
+        scene.add(dir);
+
+        const grid = new THREE.GridHelper(600, 40, 0x1a1a2e, 0x111120);
+        grid.position.y = -100;
+        scene.add(grid);
+        scene.add(new THREE.AxesHelper(80));
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        })();
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        const overlay    = document.getElementById('canvas-overlay');
+        const overlayMsg = document.getElementById('canvas-overlay-msg');
+
+        function showOverlay(msg) { overlayMsg.textContent = msg; overlay.classList.remove('hidden'); }
+        function hideOverlay()    { overlay.classList.add('hidden'); }
+
+        function fitCamera(obj) {
+            const box    = new THREE.Box3().setFromObject(obj);
+            const center = box.getCenter(new THREE.Vector3());
+            const size   = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov    = camera.fov * Math.PI / 180;
+            const dist   = Math.abs(maxDim / (2 * Math.tan(fov / 2))) * 1.6;
+            controls.target.copy(center);
+            camera.position.copy(center).add(new THREE.Vector3(0, maxDim * 0.25, dist));
+            controls.update();
+        }
+
+        let currentMesh = null;
+        const loader    = new GLTFLoader();
+
+        function loadMesh(url, onDone) {
+            showOverlay('Loading mesh…');
+            if (currentMesh) { scene.remove(currentMesh); currentMesh = null; }
+
+            loader.load(url,
+                (gltf) => {
+                    currentMesh = gltf.scene;
+                    currentMesh.traverse(c => {
+                        if (c.isMesh) {
+                            c.material.side = THREE.DoubleSide;
+                            c.material.vertexColors = true;
+                        }
+                    });
+                    scene.add(currentMesh);
+                    fitCamera(currentMesh);
+                    hideOverlay();
+                    if (onDone) onDone(true);
+                },
+                (xhr) => {
+                    if (xhr.total) {
+                        const pct = Math.round(xhr.loaded / xhr.total * 100);
+                        overlayMsg.textContent = `Loading… ${pct}%`;
+                    }
+                },
+                (err) => {
+                    console.warn('GLB load error:', err);
+                    hideOverlay();
+                    if (onDone) onDone(false);
+                }
+            );
+        }
+
+        // ── State ─────────────────────────────────────────────────────────────
+        let batchResults = [];   // from /batch_results
+        let meshMeta     = {};   // from /meshes  { name -> {size_kb} }
+        let testSets     = [];   // from /test_sets
+
+        async function fetchState() {
+            const [resArr, meshArr, setsArr] = await Promise.all([
+                fetch('/batch_results').then(r => r.json()).catch(() => []),
+                fetch('/meshes').then(r => r.json()).catch(() => []),
+                fetch('/test_sets').then(r => r.json()).catch(() => []),
+            ]);
+            batchResults = resArr;
+            testSets     = setsArr;
+            meshMeta     = {};
+            meshArr.forEach(m => { meshMeta[m.name] = m; });
+        }
+
+        // ── Pair list ─────────────────────────────────────────────────────────
+        function buildSidebar() {
+            const list = document.getElementById('pair-list');
+            list.innerHTML = '';
+
+            const statusMap = {};
+            batchResults.forEach(r => { statusMap[r.pair] = r; });
+
+            testSets.forEach((s, idx) => {
+                const r    = statusMap[s.name];
+                const cls  = r ? (r.status === 'success' ? 'ok' : r.status === 'skipped' ? 'skip' : 'err') : '';
+                const meta = r ? `${r.time_s ?? '—'}s` : '—';
+
+                const item = document.createElement('div');
+                item.className = 'pair-item';
+                item.dataset.pair = s.name;
+                item.innerHTML = `
+                    <div class="pair-dot ${cls}"></div>
+                    <div class="pair-label">${s.name.replace('set','Set ').replace('_', ': ')}</div>
+                    <div class="pair-meta">${meta}</div>
+                `;
+                item.addEventListener('click', () => selectPair(s.name));
+                list.appendChild(item);
+            });
+
+            const total   = batchResults.length;
+            const success = batchResults.filter(r => r.status === 'success').length;
+            document.getElementById('header-status').textContent =
+                total === 0 ? 'No scans yet' : `${success}/${total} meshes`;
+        }
+
+        function selectPair(sname) {
+            // Highlight active
+            document.querySelectorAll('.pair-item').forEach(el => el.classList.remove('active'));
+            const el = document.querySelector(`.pair-item[data-pair="${sname}"]`);
+            if (el) el.classList.add('active');
+
+            // Update info panel
+            const r = batchResults.find(r => r.pair === sname);
+            document.getElementById('info-title').textContent = sname.replace('_', ' ');
+            document.getElementById('stat-status').textContent = r ? r.status : '—';
+            document.getElementById('stat-views').textContent  = r ? `${r.images ?? '—'} views` : '—';
+            document.getElementById('stat-time').textContent   = r ? `${r.time_s ?? '—'}s` : '—';
+
+            const meshName = `mesh_${sname}.glb`;
+            const meta     = meshMeta[meshName];
+            document.getElementById('stat-size').textContent   = meta ? `${meta.size_kb} KB` : '—';
+
+            // Update image strip
+            const strip = document.getElementById('image-strip');
+            strip.innerHTML = '';
+            const setData = testSets.find(s => s.name === sname);
+            if (setData && setData.images) {
+                setData.images.forEach(url => {
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.className = 'thumb';
+                    img.onclick = () => window.open(url, '_blank');
+                    strip.appendChild(img);
+                });
+            }
+
+            if (r && r.status === 'success' && r.mesh) {
+                loadMesh(r.mesh + '?t=' + Date.now());
+            } else {
+                showOverlay(r ? (r.message || 'No mesh for this pair') : 'No scan data yet');
+            }
+        }
+
+        // ── Batch scan ────────────────────────────────────────────────────────
+        const batchBtn  = document.getElementById('batchBtn');
+        const batchLog  = document.getElementById('batch-log');
+        const progressEl = document.getElementById('progress-bar');
+
+        function log(msg) {
+            batchLog.textContent += msg + '\n';
+            batchLog.scrollTop = batchLog.scrollHeight;
+        }
+
+        batchBtn.addEventListener('click', async () => {
+            batchBtn.disabled = true;
+            batchLog.textContent = '';
+            progressEl.style.width = '0%';
+            log('Starting batch scan…');
+
+            try {
+                const res  = await fetch('/batch_scan', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.results) {
+                    data.results.forEach((r, idx) => {
+                        const pct = Math.round((idx + 1) / data.results.length * 100);
+                        progressEl.style.width = pct + '%';
+                        const icon = r.status === 'success' ? '✓' : r.status === 'skipped' ? '⚠' : '✗';
+                        log(`${icon} ${r.pair}: ${r.status} (${r.time_s ?? '?'}s)`);
+                    });
+                    log('Done!');
+                }
+
+                // Refresh sidebar
+                await fetchState();
+                buildSidebar();
+            } catch (err) {
+                log('Error: ' + err);
+            } finally {
+                batchBtn.disabled = false;
+            }
+        });
+
+        // ── Init ─────────────────────────────────────────────────────────────
+        (async () => {
+            await fetchState();
+            buildSidebar();
+            // Auto-load first successful mesh
+            const first = batchResults.find(r => r.status === 'success');
+            if (first) {
+                setTimeout(() => selectPair(first.pair), 300);
+            } else if (testSets.length > 0) {
+                setTimeout(() => selectPair(testSets[0].name), 300);
+            } else {
+                showOverlay('No test sets found — check data/test_sets/');
+            }
+        })();
+    </script>
+</body>
+</html>
