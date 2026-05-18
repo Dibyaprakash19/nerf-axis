@@ -1,0 +1,103 @@
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./pause_and_preview_camera.sh
+
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./restart_4image_auto.sh
+
+***************************************
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./run_4image_with_background_once.sh
+
+
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./run_single_view_relief.sh
+
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./run_4view_surface_shell.sh
+
+
+# Progrssion
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./switch_auto_to_surface_shell.sh
+
+
+# Regression
+cd /Users/spass/ws/soa/nerf-axis/pi_scan
+./switch_auto_to_default_4image.sh
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Nerf-Axis Control Commands
+
+## Remote Execution
+ssh gp@gp5.local "cd ~/pi_scan && source venv/bin/activate && python3 full_scan.py"
+
+## Autonomous Service (New)
+# Restart after syncing code
+ssh gp@gp5.local "sudo systemctl restart nerf_scan"
+
+# View live logs/gestures
+ssh gp@gp5.local "journalctl -u nerf_scan -f"
+
+# Stop everything
+ssh gp@gp5.local "sudo systemctl stop nerf_scan"
+
+## Legacy / Manual (Old)
+ssh gp@gp5.local "cd ~/pi_scan && source venv/bin/activate && python3 full_scan.py"
+ssh gp@gp5.local "pkill -f python3"
+
+
+./sync.sh
+ssh gp@gp5.local "sudo systemctl restart nerf_scan"
+
+ssh gp@gp5.local "sudo systemctl stop nerf_scan; pkill -9 -f python3; pkill -9 -f libcamera; sudo systemctl start nerf_scan"
+
+ssh gp@gp5.local "journalctl -u nerf_scan -f"
+
+gpioinfo
+
+
+load hwd drivers
+ssh gp@gp5.local "sudo modprobe spi_bcm2835 && sudo modprobe spidev"
+
+
+# SSH in and run the preview script
+ssh gp@gp5.local "cd ~/pi_scan && source venv/bin/activate && python3 tft_cam.py"
+
+
+ssh gp@192.168.137.128 "cd ~/pi_scan && source venv/bin/activate && python3 tft_cam.py"
+
+## NEW PIPELINE COMMANDS
+
+# Sync all code to Pi (including mvs/ and colmap/)
+cd ~/ws/soa/nerf-axis/pi_scan && ./sync.sh
+
+# Run calibration capture on Pi (shows 3,2,1 countdown on TFT)
+ssh gp@gp5.local "sudo systemctl stop nerf_scan && cd ~/pi_scan && source venv/bin/activate && python3 capture_calibration.py"
+
+# Download captured calibration images to Mac
+mkdir -p ~/ws/soa/nerf-axis/calib
+rsync -avP gp@gp5.local:~/pi_scan/calib/ ~/ws/soa/nerf-axis/calib/
+
+# Run calibration computation on Mac
+python3 ~/ws/soa/nerf-axis/calibrate.py
+
+# Switch Pi boot service to use OpenMVS pipeline
+ssh gp@gp5.local "cd ~/pi_scan/mvs && ./run.sh"
+
+# Switch Pi boot service to use COLMAP pipeline
+ssh gp@gp5.local "cd ~/pi_scan/colmap && ./run.sh"
+
+# Revert Pi boot service back to legacy TSDF approach
+~/ws/soa/nerf-axis/restore_legacy.sh
